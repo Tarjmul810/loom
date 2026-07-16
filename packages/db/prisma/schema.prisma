@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Video {
+  id          String      @id @default(cuid())
+  userId      String
+  title       String
+  r2Key       String
+  status      VideoStatus @default(processing)
+  duration    Int?
+  views       Int         @default(0)
+  transcript  Json? 
+  transcribed Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  comments    Comment[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  videoId   String
+  userId    String
+  text      String
+  timestamp Int
+  createdAt DateTime @default(now())
+  video     Video    @relation(fields: [videoId], references: [id])
+}
+
+enum VideoStatus {
+  processing
+  ready
+  failed
+}
