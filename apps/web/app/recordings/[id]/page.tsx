@@ -188,7 +188,7 @@ export default function RecordingPage() {
                     <>
                       {/* thumbnail / preview image here, if you have one */}
                       <button
-                        onClick={() => setIsPlaying(true)}
+                        onClick={() => setIsPlaying(true)} 
                         disabled={!rec?.videoUrl}
                         className="absolute inset-0 grid place-items-center"
                       >
