@@ -1,5 +1,0 @@
-token: cfat_7zXpBroPPkAdj2BAhGAjh0Lnx7AvRUiKLAc4yik64c2d7a7a
-access: e04c152c9661e97d8593ffd1371faeb3
-secret: c89ac1c0db8e897379ac63f1b6e1847570d6cdd131b6170a1bba70127417bfb1
-url: https://7b9a80ddd8d62ae53a751c5952834194.r2.cloudflarestorage.com
-
