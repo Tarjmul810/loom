@@ -1,159 +1,212 @@
-# Turborepo starter
+# Loomy — AI Screen Recorder
 
-This Turborepo starter is maintained by the Turborepo core team.
+A Loom-inspired screen recording app with AI-powered transcription. Record your screen, get automatic transcripts, and share your recordings.
 
-## Using this example
+Built as an internship project.
 
-Run the following command:
+---
 
-```sh
-npx create-turbo@latest
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Monorepo | Turborepo |
+| Frontend | Next.js 15 (App Router) |
+| Auth | Clerk |
+| Database | Neon (PostgreSQL) + Prisma |
+| Storage | Cloudflare R2 |
+| Transcription | Groq Whisper |
+| Styling | Tailwind CSS |
+
+---
+
+## Project Structure
+
+```
+loomy/
+├── apps/
+│   └── web/                    # Next.js app
+│       └── src/app/
+│           ├── api/
+│           │   ├── upload/
+│           │   │   └── presigned-url/  # Generate R2 upload URLs
+│           │   └── videos/
+│           │       ├── route.ts        # GET all, POST create
+│           │       └── [id]/
+│           │           └── route.ts    # GET single video
+│           ├── dashboard/      # Video list page
+│           ├── record/         # Recording page
+│           └── video/[id]/     # Video playback page
+├── packages/
+│   ├── db/                     # Prisma client + schema
+│   ├── storage/                # Cloudflare R2 client
+│   └── transcription/          # Groq transcription logic
 ```
 
-## What's inside?
+---
 
-This Turborepo includes the following packages/apps:
+## How It Works
 
-### Apps and Packages
+### Recording Pipeline
+1. User clicks **Start Recording** → browser captures screen + microphone via `getDisplayMedia` + `getUserMedia`
+2. `MediaRecorder` collects video chunks in memory
+3. User clicks **Stop Recording** → chunks assembled into a `Blob`
+4. Browser requests a presigned URL from `POST /api/upload/presigned-url`
+5. Browser uploads `Blob` directly to Cloudflare R2 via `HTTP PUT` — server never touches the bytes
+6. Browser calls `POST /api/videos` → saves video metadata to Neon DB with status `processing`
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+### Transcription Pipeline
+1. After DB record is created, `transcribeVideo()` fires in the background (fire and forget)
+2. Downloads video from R2 using `GetObjectCommand`
+3. Sends audio to Groq Whisper (`whisper-large-v3`)
+4. On success → saves transcript text to DB, updates status to `ready`
+5. On failure → updates status to `failed`
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+### Playback
+1. `GET /api/videos/[id]` fetches video record from DB scoped to authenticated user
+2. Generates a presigned read URL from R2 (valid 1 hour)
+3. Frontend renders `<video src={presignedUrl} />`  with transcript below
 
-### Utilities
+---
 
-This Turborepo has some additional tools already setup for you:
+## Getting Started
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+### Prerequisites
+- Node.js 18+
+- pnpm
+- Accounts: Clerk, Neon, Cloudflare R2, Groq
 
-### Build
+### 1. Clone the repo
 
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+```bash
+git clone https://github.com/yourusername/loomy.git
+cd loomy
+pnpm install
 ```
 
-Without global `turbo`, use your package manager:
+### 2. Set up environment variables
 
-```sh
-cd my-turborepo
-npx turbo build
-pnpm dlx turbo build
-pnpm exec turbo build
+Create `.env` in the root:
+
+```env
+# Clerk
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/dashboard
+NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/dashboard
+
+# Neon DB
+DATABASE_URL=
+
+# Cloudflare R2
+CLOUDFLARE_ACCOUNT_ID=
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+R2_BUCKET_NAME=
+
+# Groq
+GROQ_API_KEY=
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### 3. Set up the database
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```bash
+cd packages/db
+npx prisma migrate dev
+npx prisma generate
 ```
 
-Without global `turbo`:
+### 4. Configure Cloudflare R2 CORS
 
-```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+In your R2 bucket settings, add this CORS policy:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:3000"],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "MaxAgeSeconds": 3600
+  }
+]
 ```
 
-### Develop
+### 5. Run the app
 
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
+```bash
+pnpm dev
 ```
 
-Without global `turbo`, use your package manager:
+App runs at `http://localhost:3000`
 
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
+---
+
+## Database Schema
+
+```prisma
+model Video {
+  id         String      @id @default(cuid())
+  userId     String
+  title      String
+  r2Key      String
+  status     VideoStatus @default(processing)
+  duration   Int?
+  views      Int         @default(0)
+  transcript Json?
+  summary    String?
+  chapters   Json?
+  createdAt  DateTime    @default(now())
+  comments   Comment[]
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  videoId   String
+  userId    String
+  text      String
+  timestamp Int
+  createdAt DateTime @default(now())
+  video     Video    @relation(fields: [videoId], references: [id])
+}
+
+enum VideoStatus {
+  processing
+  ready
+  failed
+}
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+---
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+## Key Design Decisions
 
-```sh
-turbo dev --filter=web
-```
+**Direct browser-to-R2 upload** — Video bytes never pass through the server. The API only generates a presigned URL. This avoids Next.js body size limits and keeps the server lightweight.
 
-Without global `turbo`:
+**Fire-and-forget transcription** — Transcription is triggered after DB record creation without `await`. The API responds immediately while transcription runs in the background.
 
-```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+**Scoped DB queries** — Every video query filters by both `id` and `userId` to prevent unauthorized access across users.
 
-### Remote Caching
+**Separate packages for storage and transcription** — R2 client lives in `packages/storage`, Groq logic in `packages/transcription`. Swapping providers only requires changes in one place.
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+---
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+## Features
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
+- Screen + microphone recording via browser APIs
+- Direct upload to Cloudflare R2 via presigned URLs
+- Automatic AI transcription via Groq Whisper
+- Video playback with secure presigned read URLs
+- Dashboard with search and recording stats
+- Protected routes via Clerk auth
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+---
 
-```sh
-cd my-turborepo
-turbo login
-```
+## Future Improvements
 
-Without global `turbo`, use your package manager:
-
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
-```
-
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
-
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
-```
-
-Without global `turbo`:
-
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
-```
-
-## Useful Links
-
-Learn more about the power of Turborepo:
-
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+- Background job queue (Inngest / BullMQ) for reliable transcription
+- Video thumbnails
+- Shareable public links
+- AI-generated summaries and chapters
+- Comments with timestamp references
